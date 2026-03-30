@@ -1,0 +1,16 @@
+# Sensitive files
+credentials.json
+farm.log
+state.json
+register-*.js
+debug-register.js
+
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+
+# Temp files
+*.tmp
+/tmp/

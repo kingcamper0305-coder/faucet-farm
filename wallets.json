@@ -1,0 +1,23 @@
+{
+  "wallets": {
+    "XRP": "rNsRraPB3NGM6U67EYcCQnAz2VTXyagDY5",
+    "BTC": "bc1q35et3dlu8dvk34j8ueljjzep262tcj8l3jlcwc",
+    "ETH": "0xae661aFB23231174B138ff6071F71FC4C452AcD0",
+    "SOL": "8RJf9nZYYgaHppTPLuLRWd7oV2nwfmWBBtfaKigGTH96",
+    "LTC": "ltc1qt99lnuhur28vzl4gy77em68z24mx0gr52kmn6e",
+    "DOGE": "DQpPfHsMarNBCe9xkTYPdK1pvJ1BFruNSK",
+    "BNB": "0xa8E0bBbf1FCdd6f5b8C728e903B9cf10bE78f7f2",
+    "TRX": "TJwy6hpHDAL2hZBVTiFBFm8E6vTvNqsCJK",
+    "TON": "UQC_-DIz_F02Qqtn6OoWgXYgHwMFLm5xgjKJQ6gjMJ-18rUH",
+    "ADA": "addr1q85prgvccla2yfqveeslm2w5chyu25neus5l4y5jzglplry9rpetyr35uqpscxa2gl7tkz0290zgvs3gvng4l5rjltcsp36me2",
+    "DASH": "Xn3eaMUjYmvFjYcwuWLrAFuHR6PUmSTfev",
+    "BCH": "qqclrmte82t3g60n8zrgnhkw2aq0xh57h54xmndn9t",
+    "USDT": "TPVBLLKFkL8Bsk61cgRV7MMC5VXNptngir",
+    "SHIB": "0xfb66d152d411270995a33403472cf0f6f57baa6e"
+  },
+  "notes": {
+    "BNB_addr": "Same as ETH address (BEP-20)",
+    "SHIB_addr": "Same as ETH address (ERC-20)",
+    "USDT_addr": "TRC-20 (Tron network)"
+  }
+}
