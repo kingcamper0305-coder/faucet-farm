@@ -15,16 +15,16 @@
     "freebitco_in": {
       "enabled": true,
       "url": "https://freebitco.in",
-      "email": "${FAUCET_EMAIL}",
-      "password": "${FAUCET_PASS}",
+      "email": "Kingcamper0305@gmail.com",
+      "password": "Camper0305!",
       "coin": "BTC",
       "interval_hours": 1
     },
     "faucetcrypto": {
       "enabled": true,
       "url": "https://faucetcrypto.com",
-      "email": "${FAUCET_EMAIL}",
-      "password": "${FAUCET_PASS}",
+      "email": "Kingcamper0305@gmail.com",
+      "password": "Camper0305!",
       "coin": "MULTI",
       "interval_minutes": 40
     },
@@ -86,8 +86,8 @@
     "stormgain": {
       "enabled": true,
       "url": "https://app.stormgain.com/crypto-miner/",
-      "email": "${FAUCET_EMAIL}",
-      "password": "${FAUCET_PASS}"
+      "email": "Kingcamper0305@gmail.com",
+      "password": "Camper0305!"
     },
     "cryptosfaucet_network": {
       "enabled": true,
@@ -109,8 +109,8 @@
         "https://freepancake.com",
         "https://freeshibainu.com"
       ],
-      "email": "${FAUCET_EMAIL}",
-      "password": "${FAUCET_PASS}"
+      "email": "Kingcamper0305@gmail.com",
+      "password": "Camper0305!"
     }
   }
 }
