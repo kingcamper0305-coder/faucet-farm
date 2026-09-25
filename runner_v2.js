@@ -17,7 +17,22 @@ const LOG_PATH = path.join(__dirname, 'farm.log');
 const STATE_PATH = path.join(__dirname, 'state.json');
 const DISCOVERY_PATH = path.join(__dirname, 'discovered.json');
 
-const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+const rawConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+
+// Expand env var placeholders in config recursively
+function expandEnv(obj) {
+  if (typeof obj === 'string') {
+    return obj.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] || '');
+  }
+  if (Array.isArray(obj)) return obj.map(expandEnv);
+  if (obj && typeof obj === 'object') {
+    const result = {};
+    for (const [k, v] of Object.entries(obj)) result[k] = expandEnv(v);
+    return result;
+  }
+  return obj;
+}
+const config = expandEnv(rawConfig);
 const wallets = JSON.parse(fs.readFileSync(WALLETS_PATH, 'utf8')).wallets;
 
 // ─── STATE ───
