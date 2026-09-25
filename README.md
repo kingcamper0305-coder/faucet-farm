@@ -1,74 +1,65 @@
-# 🎰 Faucet Farm
+# 🚀 Faucet Farm v2 — Supercharged
 
-Automated crypto faucet claiming from a cloud server. Uses Playwright + Tor for headless browser automation across multiple faucet sites.
+Automated crypto faucet claiming with CAPTCHA bypass, auto-discovery, and API integration.
 
-## Features
+## 🔥 New in v2
 
-- **26 faucet sites** across 5 networks (CryptosFaucet, beefaucet.org, Pick.io, Freebitco.in, FaucetCrypto)
-- **17 cryptocurrencies** — BTC, ETH, LTC, DOGE, BNB, TRX, SOL, TON, XRP, ADA, DASH, BCH, USDT, SHIB, and more
-- **Tor proxy** for IP rotation
-- **Anti-detection** — hides webdriver fingerprint
-- **Smart scheduling** — per-faucet cooldown tracking
-- **Wallet routing** — auto-fills correct wallet address per coin
+- **CAPTCHA bypass** — Detects reCAPTCHA v2 and solves via 2Captcha API (CAPTCHA_KEY)
+- **FaucetPay API** — Claims 50+ coins directly via API (no browser, no CAPTCHA)
+- **Moon faucets** — moonbitcoin.cash, moonlitecoin.cash, moondoge.cash
+- **BonusBitcoin** — bitcoin faucet
+- **Allcoins.pw** — BTC/DOGE/LTC claims
+- **Auto faucet discovery** — Scrapes faucet sites for new coins every 10 cycles
+- **Auto-add** — Newly discovered faucets auto-added to config.json
+- **Rolling stats** — Today/week/month claim tracking in state.json
+- **Healthcheck HTTP server** — Railway-friendly on port 8080
 
-## Setup
+## Supported Faucets (50+)
 
-```bash
-# Install dependencies
-npm install
-
-# Configure your wallets
-nano wallets.json
-
-# Configure faucet accounts
-nano config.json
-
-# Run
-node runner.js
-
-# Check status
-node status.js
-```
-
-## Requirements
-
-- Node.js 18+
-- Chromium (`apt install chromium`)
-- Tor (`apt install tor`)
-
-## Architecture
-
-```
-runner.js          — Main automation engine
-config.json        — Faucet site credentials & settings
-wallets.json       — Crypto wallet addresses per coin
-status.js          — Status checker & progress viewer
-```
-
-## Faucet Networks
-
-| Network | Sites | Coins |
-|---------|-------|-------|
-| CryptosFaucet | 16 | ADA, BNB, BTC, DASH, DOGE, ETH, LTC, TRX, XRP, etc. |
-| beefaucet.org | 1 (rotates 9) | BTC, DOGE, LTC, TRX, BNB, SOL, ETH, XRP, TON |
-| Pick.io | 6 | BNB, LTC, SOL, TON, TRX, DOGE |
+| Network | Sites/Pairs | Pays |
+|---------|-------------|------|
+| CryptosFaucet | 16 sites | ADA, BNB, BTC, DASH, DOGE, ETH, LTC, TRX, XRP, etc |
+| Beefaucet | 9 coins | BTC, DOGE, LTC, TRX, BNB, SOL, ETH, XRP, TON |
+| Pick.io | 8 coins | BTC, ETH, BNB, LTC, SOL, TON, TRX, DOGE |
+| FaucetPay API | 13 coins | BTC, LTC, DOGE, TRX, USDT, SOL, BNB, ETH, TON, BCH, DASH, XRP, ADA |
+| Moon faucets | 3 | BTC, LTC, DOGE |
+| BonusBitcoin | 1 | BTC |
+| Allcoins.pw | 3 | BTC, DOGE, LTC |
 | Freebitco.in | 1 | BTC |
 | FaucetCrypto | 1 | Multi-coin |
+| StormGain | 1 | BTC (cloud mining) |
 
-## Known Limitations
+## Quick Start
 
-- **Cloudflare Turnstile** blocks headless browsers on CryptosFaucet sites
-- **Datacenter IPs** detected by FaucetCrypto and similar sites
-- **Captcha solving** requires external service (2Captcha, CapMonster) for full automation
-- **Account creation** needs manual registration or residential IP
+### Railway (free)
+Deploy at railway.app, add these env vars:
+- FAUCET_EMAIL — Email for logged-in faucets
+- FAUCET_PASS — Password
+- FAUCETPAY_KEY — (optional) FaucetPay API key
+- CAPTCHA_KEY — (optional) 2Captcha key
 
-## Status
+### Self-hosted
+```bash
+npm install
+nano config.json   # replace ${FAUCET_EMAIL} etc with your credentials
+node runner_v2.js
+```
 
-🟢 Runner built & tested  
-🟢 Tor proxy working  
-🟡 Needs manual account creation (datacenter IP blocked)  
-🟡 Captcha integration pending  
+## Files
+
+| File | Purpose |
+|------|---------|
+| runner_v2.js | v2 main engine — all features |
+| runner.js | v1 original (legacy) |
+| config.json | Faucet accounts, wallet routes, settings |
+| wallets.json | Your crypto wallet addresses |
+| status.js | Claim status viewer |
+| state.json | Auto-generated — claim history |
+| discovered.json | Auto-generated — newly found faucets |
+
+## Env Variables (Railway)
+
+FAUCET_EMAIL, FAUCET_PASS, FAUCETPAY_KEY, CAPTCHA_KEY, PORT=8080
 
 ## License
-
 MIT
