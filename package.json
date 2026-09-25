@@ -1,16 +1,15 @@
 {
   "name": "faucet-farm",
-  "version": "1.0.0",
-  "description": "Cloud faucet automation with Playwright + Tor",
-  "main": "runner.js",
+  "version": "2.0.0",
+  "description": "🚀 Supercharged faucet farm — CAPTCHA bypass, auto-discovery, 50+ faucets",
+  "main": "runner_v2.js",
   "scripts": {
-    "start": "node runner.js",
-    "once": "node runner.js --once",
+    "start": "node runner_v2.js",
+    "v1": "node runner.js",
+    "once": "node runner_v2.js --once",
     "status": "node status.js",
     "log": "tail -50 farm.log"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "playwright": "^1.58.0"
   }
