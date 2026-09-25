@@ -4,10 +4,7 @@
   "tor_proxy": "socks5://127.0.0.1:9050",
   "rotate_ip_every": 10,
   "headless": true,
-  "delay_between_claims": [
-    30000,
-    90000
-  ],
+  "delay_between_claims": [30000, 90000],
   "captcha": {
     "twocaptcha_key": "${CAPTCHA_KEY}"
   },
@@ -15,102 +12,52 @@
     "freebitco_in": {
       "enabled": true,
       "url": "https://freebitco.in",
-      "email": "Kingcamper0305@gmail.com",
-      "password": "Camper0305!",
+      "email": "${FAUCET_EMAIL}",
+      "password": "${FAUCET_PASS}",
       "coin": "BTC",
       "interval_hours": 1
     },
     "faucetcrypto": {
       "enabled": true,
       "url": "https://faucetcrypto.com",
-      "email": "Kingcamper0305@gmail.com",
-      "password": "Camper0305!",
+      "email": "${FAUCET_EMAIL}",
+      "password": "${FAUCET_PASS}",
       "coin": "MULTI",
       "interval_minutes": 40
     },
-    "pick_io_bnb": {
-      "enabled": true,
-      "url": "https://pick.io/bnb",
-      "coin": "BNB"
-    },
-    "pick_io_ltc": {
-      "enabled": true,
-      "url": "https://pick.io/ltc",
-      "coin": "LTC"
-    },
-    "pick_io_sol": {
-      "enabled": true,
-      "url": "https://pick.io/sol",
-      "coin": "SOL"
-    },
-    "pick_io_ton": {
-      "enabled": true,
-      "url": "https://pick.io/ton",
-      "coin": "TON"
-    },
-    "pick_io_trx": {
-      "enabled": true,
-      "url": "https://pick.io/trx",
-      "coin": "TRX"
-    },
-    "pick_io_doge": {
-      "enabled": true,
-      "url": "https://pick.io/doge",
-      "coin": "DOGE"
-    },
-    "pick_io_btc": {
-      "enabled": true,
-      "url": "https://pick.io/btc",
-      "coin": "BTC"
-    },
-    "pick_io_eth": {
-      "enabled": true,
-      "url": "https://pick.io/eth",
-      "coin": "ETH"
-    },
+    "pick_io_bnb": { "enabled": true, "url": "https://pick.io/bnb", "coin": "BNB" },
+    "pick_io_ltc": { "enabled": true, "url": "https://pick.io/ltc", "coin": "LTC" },
+    "pick_io_sol": { "enabled": true, "url": "https://pick.io/sol", "coin": "SOL" },
+    "pick_io_ton": { "enabled": true, "url": "https://pick.io/ton", "coin": "TON" },
+    "pick_io_trx": { "enabled": true, "url": "https://pick.io/trx", "coin": "TRX" },
+    "pick_io_doge": { "enabled": true, "url": "https://pick.io/doge", "coin": "DOGE" },
+    "pick_io_btc": { "enabled": true, "url": "https://pick.io/btc", "coin": "BTC" },
+    "pick_io_eth": { "enabled": true, "url": "https://pick.io/eth", "coin": "ETH" },
     "beefaucet": {
       "enabled": true,
       "url": "https://beefaucet.org",
-      "coins": [
-        "btc",
-        "doge",
-        "ltc",
-        "tron",
-        "bnb",
-        "sol",
-        "eth",
-        "xrp",
-        "ton"
-      ]
+      "coins": ["btc","doge","ltc","tron","bnb","sol","eth","xrp","ton"]
     },
     "stormgain": {
       "enabled": true,
       "url": "https://app.stormgain.com/crypto-miner/",
-      "email": "Kingcamper0305@gmail.com",
-      "password": "Camper0305!"
+      "email": "${FAUCET_EMAIL}",
+      "password": "${FAUCET_PASS}"
     },
     "cryptosfaucet_network": {
       "enabled": true,
       "sites": [
-        "https://freecardano.com",
-        "https://freebinancecoin.com",
-        "https://freebitcoin.io",
-        "https://freedash.io",
-        "https://free-doge.com",
-        "https://freeethereum.com",
-        "https://free-ltc.com",
-        "https://freeneo.io",
-        "https://freesteam.io",
-        "https://free-tron.com",
-        "https://freeusdcoin.com",
-        "https://freetether.com",
-        "https://freenem.com",
-        "https://coinfaucet.io",
-        "https://freepancake.com",
-        "https://freeshibainu.com"
+        "https://freecardano.com", "https://freebinancecoin.com",
+        "https://freebitcoin.io", "https://freedash.io",
+        "https://free-doge.com", "https://freeethereum.com",
+        "https://free-ltc.com", "https://freeneo.io",
+        "https://freesteam.io", "https://free-tron.com",
+        "https://freeusdcoin.com", "https://freetether.com",
+        "https://freenem.com", "https://coinfaucet.io",
+        "https://freepancake.com", "https://freeshibainu.com"
       ],
-      "email": "Kingcamper0305@gmail.com",
-      "password": "Camper0305!"
+      "email": "${FAUCET_EMAIL}",
+      "password": "${FAUCET_PASS}"
     }
   }
 }
