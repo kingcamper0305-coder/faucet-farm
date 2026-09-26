@@ -77,8 +77,12 @@ async function getBrowser() {
 
 // ─── FAUCETPAY API ───
 async function claimFaucetPayAPI() {
-  const apiKey = ***;
-  if (!apiKey) return 0;
+  // Get API key from environment variable
+  const apiKey = process.env.FAUCETPAY_API_KEY || '';
+  if (!apiKey) {
+    log('⚠️ FAUCETPAY_API_KEY not set - skipping FaucetPay API claims');
+    return 0;
+  }
   let claimed = 0;
   const coins = ['BTC', 'LTC', 'DOGE', 'TRX', 'USDT', 'SOL', 'BNB', 'ETH', 'TON', 'BCH', 'DASH', 'XRP', 'ADA'];
   for (const coin of coins) {
@@ -86,7 +90,7 @@ async function claimFaucetPayAPI() {
     if ((Date.now() - (state.lastClaims[k] || 0)) < 3600000) continue;
     try {
       const addr = wallets[coin] || wallets.BTC;
-      const resp = await fetch(`https://faucetpay.io/api/v1/claim?api_key=***}&coin=${coin}&address=${addr}`);
+      const resp = await fetch(`https://faucetpay.io/api/v1/claim?api_key=${apiKey}&coin=${coin}&address=${addr}`);
       const d = await resp.json();
       if (d.success) {
         log(`💰 FaucetPay ${coin}: ${d.amount || '?'}`);
@@ -100,153 +104,91 @@ async function claimFaucetPayAPI() {
   return claimed;
 }
 
-// ─── PICK.IO ───
-async function claimPickIo() {
-  let claimed = 0;
-  const picks = ['BTC','ETH','SOL','BNB','LTC','DOGE','TON','TRX'];
-  for (const coin of picks) {
-    const k = 'pick_' + coin;
-    if ((Date.now() - (state.lastClaims[k] || 0)) < 3600000) continue;
-    try {
-      const addr = wallets[coin] || wallets.BTC;
-      const resp = await fetch(`https://pick.io/${coin.toLowerCase()}/faucet?address=` + encodeURIComponent(addr));
-      const txt = await resp.text();
-      if (txt.includes('success') || !txt.includes('error')) {
-        log(`✅ Pick.io/${coin}: done`);
-        state.lastClaims[k] = Date.now();
-        claimed++;
-      } else { log(`⏰ Pick.io/${coin}: ${txt.slice(0,80)}`); }
-    } catch (e) { /* skip */ }
-    await sleep(randDelay(2000, 5000));
-  }
-  return claimed;
-}
-
-// ─── CRYPTOSFAUCET ───
-async function claimCryptosFaucet() {
-  const cfg = config.faucets?.cryptosfaucet_network;
-  if (!cfg?.enabled) return 0;
-  let claimed = 0;
-  for (const url of (cfg.sites || [])) {
-    const k = 'crypto_' + url.replace(/https?:\/\//, '').split('.')[0];
-    if ((Date.now() - (state.lastClaims[k] || 0)) < 3600000) continue;
-    try {
-      await fetch(url + '/?r=' + wallets.BTC);
-      log(`✅ ${url}: claimed`);
-      state.lastClaims[k] = Date.now();
-      claimed++;
-    } catch (e) { /* skip */ }
-    await sleep(randDelay(2000, 5000));
-  }
-  return claimed;
-}
-
-// ─── BEEFAUCET ───
-async function claimBeeFaucet() {
-  const cfg = config.faucets?.beefaucet;
-  if (!cfg?.enabled) return 0;
-  let claimed = 0;
-  for (const coin of (cfg.coins || [])) {
-    const k = 'bee_' + coin;
-    if ((Date.now() - (state.lastClaims[k] || 0)) < 3600000) continue;
-    try {
-      const addr = wallets[coin.toUpperCase()] || wallets.BTC;
-      await fetch(`https://beefaucet.org/${coin.toLowerCase()}-faucet/`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      log(`🐝 BeeFaucet ${coin}: done`);
-      state.lastClaims[k] = Date.now();
-      claimed++;
-    } catch (e) { /* skip */ }
-    await sleep(randDelay(2000, 5000));
-  }
-  return claimed;
-}
-
-// ─── CYCLE ───
-async function runCycle() {
-  log('🔄 Cycle starting...');
-  let claims = 0;
-  claims += await claimFaucetPayAPI();
-  claims += await claimPickIo();
-  claims += await claimCryptosFaucet();
-  claims += await claimBeeFaucet();
+// ─── BROWSER CLAIMS ───
+async function claimBrowser(faucet) {
+  const browser = await getBrowser();
+  if (!browser) return false;
   
-  // Only try browser if playwright is available
-  const br = await getBrowser();
-  if (br) {
-    try {
-      log('🔧 Launching Chromium...');
-      const browser = await br.launch({
-        headless: true,
-        args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--single-process','--no-zygote']
-      });
-      const page = await browser.newPage();
+  try {
+    const ctx = await browser.launchPersistentContext('/tmp/profile', {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await ctx.newPage();
+    
+    // Navigate to faucet
+    await page.goto(faucet.url, { timeout: 30000 });
+    
+    // Wait for main content
+    await page.waitForTimeout(2000);
+    
+    // Try to find and click claim button
+    const claimBtn = await page.$('[data-testid="claim-button"], button:has-text("Claim"), .claim-btn, input[type="submit"][value*="Claim"]');
+    
+    if (claimBtn) {
+      await claimBtn.click();
+      await page.waitForTimeout(2000);
       
-      // Moon faucets
-      for (const coin of ['BTC', 'LTC', 'DOGE']) {
-        const domain = {BTC:'moonbitcoin',LTC:'moonlitecoin',DOGE:'moondoge'}[coin];
-        const k = 'moon_' + coin;
-        if ((Date.now() - (state.lastClaims[k] || 0)) > 3600000) {
-          try {
-            await page.goto(`https://${domain}.cash/`, { timeout: 15000 });
-            await sleep(3000);
-            const inp = await page.$('input[placeholder*="address" i]');
-            if (inp) await inp.fill(wallets[coin] || wallets.BTC);
-            await sleep(500);
-            const btn = await page.$('button:has-text("Start"), a:has-text("Start")');
-            if (btn) await btn.click();
-            await sleep(5000);
-            log(`✅ Moon ${coin}: done`);
-            claims++;
-            state.lastClaims[k] = Date.now();
-          } catch(e) { log(`⚠️ Moon ${coin}: ${e.message}`); }
-        }
-        await sleep(3000);
+      // Check for success message
+      const success = await page.$('[class*="success"], [class*="congratulations"]');
+      
+      if (success) {
+        log(`✅ Browser claim: ${faucet.name}`);
+        state.lastClaims['br_' + faucet.name] = Date.now();
+        await ctx.close();
+        return true;
       }
-      
-      // BonusBitcoin
-      try {
-        await page.goto('https://bonusbitcoin.co', { timeout: 15000 });
-        await sleep(3000);
-        const inp = await page.$('#btc_address');
-        if (inp) await inp.fill(wallets.BTC);
-        await sleep(500);
-        const btn = await page.$('button:has-text("Claim"), a:has-text("Claim")');
-        if (btn) await btn.click();
-        await sleep(5000);
-        log('✅ BonusBitcoin: done');
-        claims++;
-      } catch(e) { log(`⚠️ BonusBitcoin: ${e.message}`); }
-      
-      await browser.close();
-      log('✅ Browser cycle complete');
-    } catch (e) {
-      log(`⚠️ Browser cycle error: ${e.message}`);
     }
-  } else {
-    log('ℹ️ No browser - HTTP claims only');
+    
+    await ctx.close();
+    return false;
+  } catch (e) {
+    log(`❌ Browser claim failed: ${e.message}`);
+    return false;
   }
-  
-  state.totalClaims += claims;
+}
+
+// ─── MAIN CYCLE ───
+async function runCycle() {
   state.runCount++;
-  state.lastCycle = new Date().toISOString();
-  saveState();
-  log(`📊 Cycle done: ${claims} claims (total: ${state.totalClaims})`);
-  if (claims === 0) log('⚠️ Zero claims - may need FaucetPay API key or wallet recheck');
-  return claims;
-}
-
-// ─── MAIN ───
-async function main() {
-  let cycle = 0;
-  while (true) {
-    cycle++;
-    log(`\n═══ CYCLE ${cycle} ═══`);
-    try { await runCycle(); } 
-    catch (e) { log(`💥 Fatal: ${e.message}`); state.errors.push(e.message); saveState(); }
-    const wait = randDelay(1500000, 2100000);
-    log(`💤 Sleep ${Math.round(wait / 60000)}min...\n`);
-    await sleep(wait);
+  log(`\n🔄 Cycle #${state.runCount}`);
+  
+  try {
+    // API claims
+    const apiClaimed = await claimFaucetPayAPI();
+    state.totalClaims += apiClaimed;
+    
+    // Browser claims
+    let browserClaimed = 0;
+    for (const faucet of config.browserFaucets || []) {
+      const claimed = await claimBrowser(faucet);
+      if (claimed) browserClaimed++;
+      await sleep(randDelay(5000, 10000));
+    }
+    state.totalClaims += browserClaimed;
+    
+    // Log cycle summary
+    state.lastCycle = new Date().toISOString();
+    log(`📈 Cycle complete: +${apiClaimed + browserClaimed} claims (total: ${state.totalClaims})`);
+    saveState();
+    
+  } catch (e) {
+    log(`❌ Cycle error: ${e.message}`);
+    state.errors.push({ time: new Date().toISOString(), error: e.message });
+    saveState();
   }
 }
 
-main().catch(e => { console.error('FATAL:', e); process.exit(1); });
+// ─── SCHEDULER ───
+const INTERVAL = (config.claimIntervalMinutes || 30) * 60 * 1000;
+log(`⏱️ Auto-claim every ${config.claimIntervalMinutes || 30} minutes`);
+
+// Run first cycle immediately
+runCycle();
+
+// Then run on schedule
+setInterval(runCycle, INTERVAL);
+
+log('✅ FAUCET FARM running - PID: ' + process.pid);
+
