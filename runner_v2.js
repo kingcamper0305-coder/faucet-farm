@@ -10,6 +10,34 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 
+// ─── RAILWAY HEALTHCHECK ───
+const HEALTH_PORT = parseInt(process.env.PORT) || 8080;
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'ok', 
+      uptime: process.uptime(), 
+      totalClaims: state?.totalClaims || 0,
+      lastCycle: state?.lastCycle || null
+    }));
+  } else if (req.url === '/stats') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      totalClaims: state?.totalClaims || 0,
+      claimedCoins: state?.totalClaimedCoins || {},
+      lastClaims: state?.lastClaims || {},
+      errors: state?.errors?.slice(-5) || [],
+      uptime: process.uptime()
+    }));
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+server.listen(HEALTH_PORT, '0.0.0.0', () => {
+  console.log(`🌐 Healthcheck server on port ${HEALTH_PORT}`);
+});
+
 // ─── PATHS ───
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const WALLETS_PATH = path.join(__dirname, 'wallets.json');
@@ -33,9 +61,9 @@ function expandEnv(obj) {
   return obj;
 }
 const config = expandEnv(rawConfig);
-const wallets = JSON.parse(fs.readFileSync(WALLETS_PATH, 'utf8')).wallets;
 
-// ─── STATE ───
+const wallets = JSON.parse(fs.readFileSync(WALLETS_PATH, 'utf8'));
+
 let state = {
   lastClaims: {},
   totalClaims: 0,
@@ -48,32 +76,39 @@ let state = {
 function loadState() {
   try { state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')); } catch (e) {}
 }
+
 function saveState() {
-  // Update rolling stats
-  const today = new Date().toDateString();
-  if (state.statsDate !== today) {
-    state.stats = { today: 0, week: state.stats?.week || 0, month: state.stats?.month || 0 };
-    state.statsDate = today;
-  }
-  state.stats.today = Object.keys(state.lastClaims).length;
   fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 }
+
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
-  fs.appendFileSync(LOG_PATH, line + '\n');
+  try { fs.appendFileSync(LOG_PATH, line + '\n'); } catch (e) {}
 }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-function randDelay(min, max) { return Math.floor(min + Math.random() * (max - min)); }
-function truncAddr(addr) { return addr ? addr.substring(0, 10) + '...' : 'N/A'; }
 
-// ====== 2CAPTCHA INTEGRATION (bypass captchas automatically) ======
+function randDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getWallet(type, coin) {
+  return wallets[coin] || wallets.BTC;
+}
+
+function truncAddr(addr) {
+  return addr ? addr.slice(0, 8) + '...' + addr.slice(-6) : 'N/A';
+}
+
+// ─── 2CAPTCHA SOLVER ───
 async function solveCaptcha2Captcha(page, siteKey, pageUrl) {
   const apiKey = config.captcha?.twocaptcha_key;
   if (!apiKey) return null;
   
   try {
-    // Get the g-recaptcha-response by submitting to 2captcha
     const resp = await fetch(`https://2captcha.com/in.php?key=${apiKey}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${pageUrl}&json=1`);
     const data = await resp.json();
     if (data.status !== 1) { log(`⚠️ 2captcha in.php failed: ${data.request}`); return null; }
@@ -81,7 +116,6 @@ async function solveCaptcha2Captcha(page, siteKey, pageUrl) {
     const captchaId = data.request;
     log(`⏳ 2captcha solving... ID: ${captchaId}`);
     
-    // Poll for solution
     for (let i = 0; i < 60; i++) {
       await sleep(5000);
       const pollResp = await fetch(`https://2captcha.com/res.php?key=${apiKey}&action=get&id=${captchaId}&json=1`);
@@ -90,137 +124,19 @@ async function solveCaptcha2Captcha(page, siteKey, pageUrl) {
         log(`✅ 2captcha solved!`);
         return pollData.request;
       }
-    }
-  } catch (e) {
-    log(`❌ 2captcha error: ${e.message}`);
-  }
-  return null;
-}
-
-// ====== CAPTCHA DETECTION & BYPASS ======
-async function detectAndSolveCaptcha(page) {
-  // Check for reCAPTCHA v2 iframe
-  const recaptchaFrame = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"]').catch(() => null);
-  if (recaptchaFrame) {
-    log('🔍 Captcha detected!');
-    
-    // Try clicking through (sometimes it's just a checkbox)
-    const captchaCheckbox = await page.$('.recaptcha-checkbox, #recaptcha-anchor, [class*="hcaptcha"]').catch(() => null);
-    if (captchaCheckbox) {
-      await captchaCheckbox.click();
-      await sleep(2000);
-      // Check if solved
-      const checked = await page.$('.recaptcha-checkbox-checked, [aria-checked="true"]').catch(() => null);
-      if (checked) { log('✅ Captcha checkbox clicked!'); return true; }
-    }
-    
-    // Try 2captcha if configured
-    const siteKey = await page.evaluate(() => {
-      const el = document.querySelector('[data-sitekey]');
-      return el ? el.getAttribute('data-sitekey') : null;
-    }).catch(() => null);
-    
-    if (siteKey && config.captcha?.twocaptcha_key) {
-      const token = await solveCaptcha2Captcha(page, siteKey, page.url());
-      if (token) {
-        await page.evaluate((t) => {
-          document.getElementById('g-recaptcha-response')?.remove();
-          const ta = document.createElement('textarea');
-          ta.id = 'g-recaptcha-response';
-          ta.textContent = t;
-          ta.style.display = 'none';
-          document.body.appendChild(ta);
-        }, token);
-        
-        // Trigger callback
-        await page.evaluate(() => {
-          const callback = document.querySelector('[data-callback]')?.getAttribute('data-callback');
-          if (callback && window[callback]) window[callback]();
-        });
-        await sleep(1000);
-        return true;
+      if (pollData.request === 'ERROR_CAPTCHA_UNSOLVABLE') {
+        log('⚠️ 2captcha unsolvable');
+        return null;
       }
     }
-    
-    // Last resort: try to wait for auto-solve
-    log('⚠️ Captcha not auto-solved, waiting 10s...');
-    await sleep(10000);
-    return false;
-  }
-  return false; // No captcha detected
-}
-
-// ====== TOR IP ROTATION ======
-async function rotateTorIP() {
-  try {
-    const { execSync } = require('child_process');
-    execSync('kill -HUP $(cat /var/run/tor/tor.pid 2>/dev/null || pgrep -f "tor --") 2>/dev/null', { timeout: 5000 });
-    await sleep(3000);
-    log('🔄 Tor circuit rotated');
+    return null;
   } catch (e) {
-    log('⚠️ Tor rotation failed: ' + e.message);
+    log(`❌ 2captcha error: ${e.message}`);
+    return null;
   }
 }
 
-// ====== BROWSER ======
-async function createBrowser() {
-  const args = [
-    '--no-sandbox', '--disable-setuid-sandbox',
-    '--disable-blink-features=AutomationControlled',
-    '--disable-infobars', '--disable-dev-shm-usage',
-  ];
-  if (config.use_tor) args.push(`--proxy-server=${config.tor_proxy}`);
-
-  const browser = await chromium.launch({
-    headless: config.headless ?? true,
-    args
-  });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    viewport: { width: 1366, height: 768 },
-    locale: 'en-US',
-  });
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-  });
-  return { browser, context };
-}
-
-// ====== WALLET MAPPER ======
-function getWallet(site, coin) {
-  const s = (site + '' + (coin || '')).toLowerCase();
-  if (s.includes('btc')) return wallets.BTC;
-  if (s.includes('eth') || s.includes('shib')) return wallets.ETH;
-  if (s.includes('sol')) return wallets.SOL;
-  if (s.includes('ltc')) return wallets.LTC;
-  if (s.includes('doge')) return wallets.DOGE;
-  if (s.includes('bnb')) return wallets.BNB;
-  if (s.includes('trx') || s.includes('tron') || s.includes('usdt')) return wallets.TRX;
-  if (s.includes('ton')) return wallets.TON;
-  if (s.includes('ada') || s.includes('cardano')) return wallets.ADA;
-  if (s.includes('bch')) return wallets.BCH;
-  if (s.includes('dash')) return wallets.DASH;
-  if (s.includes('xrp')) return wallets.XRP;
-  return wallets.BTC; // fallback
-}
-
-// ====== HTTP-based claimer (lightweight, no browser) ======
-async function httpClaim(url, options = {}) {
-  return new Promise((resolve) => {
-    const client = url.startsWith('https') ? https : http;
-    const req = client.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 }, (res) => {
-      let data = '';
-      res.on('data', d => data += d);
-      res.on('end', () => resolve({ status: res.statusCode, data }));
-    });
-    req.on('error', (e) => resolve({ error: e.message }));
-    req.end();
-  });
-}
-
-// ====== FAUCET CLAIMERS ======
+// ─── FAUCET CLAIMERS ───
 
 // --- FaucetPay.io API (centralized claimer for 50+ coins) ---
 async function claimFaucetPayAPI() {
@@ -233,7 +149,7 @@ async function claimFaucetPayAPI() {
   for (const coin of coins) {
     const key = `faucetpay_${coin}`;
     const lastClaim = state.lastClaims[key] || 0;
-    if ((Date.now() - lastClaim) < 3600000) continue; // 1h cooldown
+    if ((Date.now() - lastClaim) < 3600000) continue;
     
     try {
       const resp = await fetch(`https://faucetpay.io/api/v1/claim?api_key=${apiKey}&coin=${coin}&address=${wallets[coin] || wallets.BTC}`);
@@ -257,7 +173,7 @@ async function claimFaucetPayAPI() {
 // --- Allcoins.pw (BTC/DOGE/LTC faucet) ---
 async function claimAllcoins(page, coin) {
   const addr = getWallet('allcoins', coin);
-  log(`🎰 Allcoins ${coin} → ${truncAddr(addr)}`);
+  log(`🎰 Allcoins ${coin} > ${truncAddr(addr)}`);
   try {
     await page.goto(`https://allcoins.pw/${coin.toLowerCase()}/`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
@@ -277,19 +193,16 @@ async function claimMoonFaucet(page, coin) {
   const domain = { BTC: 'moonbitcoin', LTC: 'moonlitecoin', DOGE: 'moondoge' }[coin];
   if (!domain) return false;
   const addr = getWallet('moon', coin);
-  log(`🎰 ${domain} ${coin} → ${truncAddr(addr)}`);
+  log(`🎰 ${domain} ${coin} > ${truncAddr(addr)}`);
   try {
     await page.goto(`https://${domain}.cash/`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(5000);
-    // Click "Free" button
     const freeBtn = await page.$('a:has-text("Free"), button:has-text("Free"), .free-btn');
     if (freeBtn) await freeBtn.click();
     await sleep(3000);
-    // Enter address and claim
     const addrInput = await page.$('input[placeholder*="Bitcoin"], input[placeholder*="address"], input[name="address"]');
     if (addrInput) await addrInput.fill(addr);
     await sleep(500);
-    // Start mining/claiming
     const startBtn = await page.$('button:has-text("Start"), a:has-text("Start"), input[value*="Start"]');
     if (startBtn) { await startBtn.click(); await sleep(10000); }
     log(`✅ ${domain}: done`);
@@ -297,214 +210,221 @@ async function claimMoonFaucet(page, coin) {
   } catch (e) { log(`❌ ${domain}: ${e.message}`); return false; }
 }
 
-// --- BonusBitcoin (multicoin faucet) ---
+// --- BonusBitcoin ---
 async function claimBonusBitcoin(page) {
   const addr = wallets.BTC;
-  log(`🎰 BonusBitcoin → ${truncAddr(addr)}`);
+  log(`🎰 BonusBitcoin > ${truncAddr(addr)}`);
   try {
     await page.goto('https://bonusbitcoin.co', { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
     const addrInput = await page.$('#btc_address, input[name="address"], input[placeholder*="address"]');
     if (addrInput) await addrInput.fill(addr);
-    await sleep(500);
-    const claimBtn = await page.$('#captcha_submit, button:has-text("Claim"), input[value*="Claim"]');
+    await sleep(1000);
+    const claimBtn = await page.$('button:has-text("Claim"), a:has-text("Claim")');
     if (claimBtn) await claimBtn.click();
-    await sleep(8000);
-    log(`✅ BonusBitcoin: done`);
+    await sleep(5000);
+    log('✅ BonusBitcoin: done');
     return true;
   } catch (e) { log(`❌ BonusBitcoin: ${e.message}`); return false; }
 }
 
-// --- Original faucets (refactored) ---
-async function claimCryptosFaucetNetwork(page, site) {
-  const cfg = config.faucets.cryptosfaucet_network;
-  const wallet = getWallet(site + ' ' + cfg.coin, '');
-  log(`🎰 CryptosFaucet ${site} → ${truncAddr(wallet)}`);
+// --- Pick.io (one coin per call) ---
+async function claimPickIo(page, coin) {
+  const addr = wallets[coin.toUpperCase()] || wallets.BTC;
+  log(`🎯 Pick.io/${coin} > ${truncAddr(addr)}`);
   try {
-    await page.goto(site + '/login', { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(2000);
-    const emailInput = await page.$('input[type="email"], input[name="email"]');
-    const passInput = await page.$('input[type="password"], input[name="password"]');
-    if (emailInput && passInput) {
-      await emailInput.fill(cfg.email);
-      await passInput.fill(cfg.password);
-      const loginBtn = await page.$('button[type="submit"], input[type="submit"]');
-      if (loginBtn) await loginBtn.click();
-      await page.waitForNavigation({ timeout: 15000 }).catch(() => {});
-    }
+    await page.goto(`https://pick.io/${coin.toLowerCase()}`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
-    const freeLink = await page.$('a[href*="free"], a:has-text("Free"), a:has-text("Claim"), a:has-text("Roll")');
-    if (freeLink) { await freeLink.click(); await page.waitForNavigation({ timeout: 15000 }).catch(() => {}); }
-    await sleep(2000);
-    const addrInput = await page.$('input[name="address"], input[name="wallet"], #address, input[placeholder*="address" i]');
-    if (addrInput) await addrInput.fill(wallet);
-    await detectAndSolveCaptcha(page);
-    const rollBtn = await page.$('button:has-text("Roll"), button:has-text("Claim"), input[value*="Roll"], input[value*="Claim"]');
-    if (rollBtn) { await rollBtn.click(); await sleep(5000); log(`✅ ${site}: claimed`); return true; }
-    log(`⏰ ${site}: cooldown?`); return false;
-  } catch (e) { log(`❌ ${site}: ${e.message}`); return false; }
+    const addrInput = await page.$('input[placeholder*="wallet"], input[placeholder*="address"], input[name="address"]');
+    if (addrInput) await addrInput.fill(addr);
+    await sleep(500);
+    const claimBtn = await page.$('button:has-text("Claim"), button[type="submit"]');
+    if (claimBtn) await claimBtn.click();
+    await sleep(5000);
+    log(`✅ Pick.io/${coin}: done`);
+    return true;
+  } catch (e) { log(`❌ Pick.io/${coin}: ${e.message}`); return false; }
 }
 
-async function claimBeefaucet(page) {
-  const coins = config.faucets.beefaucet.coins;
-  log(`🎰 Beefaucet (${coins.length} coins)`);
-  for (const coin of coins) {
+// --- BeeFaucet (multi-coin) ---
+async function claimBeeFaucet(page) {
+  const beecfg = config.faucets.beefaucet;
+  if (!beecfg?.enabled) return 0;
+  let claimed = 0;
+  for (const coin of beecfg.coins) {
+    const addr = wallets[coin.toUpperCase()] || wallets.BTC;
+    log(`🐝 BeeFaucet ${coin} > ${truncAddr(addr)}`);
     try {
       const url = `https://beefaucet.org/${coin}-faucet/?r=${wallets[coin.toUpperCase()] || wallets.BTC}`;
       await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
       await sleep(3000);
-      const addrMap = { btc: wallets.BTC, eth: wallets.ETH, doge: wallets.DOGE, ltc: wallets.LTC, bch: wallets.BCH, dash: wallets.DASH, tron: wallets.TRX, trx: wallets.TRX, bnb: wallets.BNB, sol: wallets.SOL, xrp: wallets.XRP, ton: wallets.TON, usdt: wallets.USDT, ada: wallets.ADA };
-      const wAddr = addrMap[coin] || wallets.BTC;
-      const addrInput = await page.$('#address, input[name="address"]');
-      if (addrInput) await addrInput.fill(wAddr);
-      await detectAndSolveCaptcha(page);
-      const claimBtn = await page.$('.btn.btn-block, .btn-primary');
-      if (claimBtn) await claimBtn.click();
-      await sleep(5000);
-      log(`✅ Beefaucet ${coin}: done`);
-      await sleep(randDelay(3000, 10000));
-    } catch (e) { log(`❌ Beefaucet ${coin}: ${e.message}`); }
+      const claimBtn = await page.$('button:has-text("Claim"), a:has-text("Claim")');
+      if (claimBtn) { await claimBtn.click(); await sleep(5000); }
+      log(`✅ BeeFaucet ${coin}: done`);
+      claimed++;
+    } catch (e) { log(`❌ BeeFaucet ${coin}: ${e.message}`); }
+    await sleep(randDelay(2000, 5000));
   }
+  return claimed;
 }
 
-async function claimPickIo(page, coin) {
-  const addr = getWallet('pickio', coin);
-  log(`🎰 Pick.io ${coin} → ${truncAddr(addr)}`);
-  try {
-    await page.goto(`https://pick.io/${coin.toLowerCase()}`, { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(3000);
-    const emailInput = await page.$('input[type="email"], input[name="email"], input[name="address"], input[placeholder*="address" i]');
-    if (emailInput) await emailInput.fill(addr);
-    await detectAndSolveCaptcha(page);
-    const claimBtn = await page.$('button:has-text("Claim"), button:has-text("Roll"), button[type="submit"]');
-    if (claimBtn) { await claimBtn.click(); await sleep(8000); log(`✅ Pick.io ${coin}: done`); return true; }
-    return false;
-  } catch (e) { log(`❌ Pick.io ${coin}: ${e.message}`); return false; }
-}
-
-// ====== AUTO FAUCET DISCOVERY ======
-async function discoverNewFaucets() {
-  log('🔍 Searching for new faucets...');
-  let discovered = [];
+// --- Freebitco.in, FaucetCrypto, etc (existing code) ---
+async function claimBrowserFaucet(page, faucetId) {
+  const fc = config.faucets[faucetId];
+  if (!fc?.enabled) return false;
   
-  // Sources to check for faucet lists
-  const sources = [
-    'https://raw.githubusercontent.com/.../faucets.txt', // placeholder
-    'https://faucetlist.io',
-    'https://freefaucetlist.com',
-  ];
+  const addr = wallets[fc.coin] || wallets.BTC;
+  log(`🌐 ${faucetId} > ${fc.url} > ${truncAddr(addr)}`);
   
-  // Check our known faucet providers for new coins
   try {
-    // Pick.io — check what coins they support
-    const resp = await fetch('https://pick.io/faucets');
-    const html = await resp.text();
-    const matches = html.match(/\/[a-z]{2,5}"/g) || [];
-    for (const m of matches) {
-      const coin = m.replace(/\/|"/g, '').toUpperCase();
-      if (['BTC', 'ETH', 'LTC', 'DOGE', 'BNB', 'SOL', 'TRX', 'TON', 'XRP', 'ADA', 'BCH', 'DASH', 'ZEC'].includes(coin)) {
-        if (!config.faucets[`pick_io_${coin.toLowerCase()}`]) {
-          log(`🆕 Discovered new Pick.io faucet: ${coin}`);
-          discovered.push({ source: 'pick.io', coin, url: `https://pick.io/${coin.toLowerCase()}` });
+    await page.goto(fc.url, { waitUntil: 'networkidle', timeout: 30000 });
+    await sleep(5000);
+    
+    // Login if email/password provided
+    if (fc.email && fc.email.includes('@')) {
+      const emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="email" i]');
+      if (emailInput) {
+        await emailInput.fill(fc.email);
+        const passInput = await page.$('input[type="password"]');
+        if (passInput && fc.password) {
+          await passInput.fill(fc.password);
+          const loginBtn = await page.$('button:has-text("Login"), button:has-text("Sign in"), input[value*="Login"]');
+          if (loginBtn) await loginBtn.click();
+          await sleep(5000);
         }
       }
     }
-  } catch (e) {}
-  
-  // Save discoveries
-  if (discovered.length > 0) {
-    const existing = JSON.parse(fs.readFileSync(DISCOVERY_PATH, 'utf8').catch(() => '[]'));
-    const all = [...existing, ...discovered.map(d => ({ ...d, discoveredAt: new Date().toISOString() }))];
-    fs.writeFileSync(DISCOVERY_PATH, JSON.stringify(all, null, 2));
-    log(`📝 Saved ${discovered.length} new discoveries`);
-  }
-  
-  return discovered;
-}
-
-// ====== MAIN CYCLE ======
-async function runCycle() {
-  loadState();
-  const { browser, context } = await createBrowser();
-  let claims = 0;
-  let sinceRotate = 0;
-
-  try {
-    const page = await context.newPage();
     
-    // ─── NEW: FaucetPay API claims (no browser needed) ───
-    if (config.faucetpay_api_key) {
-      log('📡 Claiming via FaucetPay API...');
-      claims += await claimFaucetPayAPI();
-    }
-
-    // ─── Moon faucets ───
-    for (const coin of ['BTC', 'LTC', 'DOGE']) {
-      const key = `moon_${coin}`;
-      if ((Date.now() - (state.lastClaims[key] || 0)) < 3600000) continue;
-      if (await claimMoonFaucet(page, coin)) { state.lastClaims[key] = Date.now(); claims++; }
-      await sleep(randDelay(10000, 20000));
-    }
-
-    // ─── BonusBitcoin ───
-    if ((Date.now() - (state.lastClaims['bonusbitcoin'] || 0)) > 3600000) {
-      if (await claimBonusBitcoin(page)) { state.lastClaims['bonusbitcoin'] = Date.now(); claims++; }
-      await sleep(randDelay(5000, 15000));
-    }
-
-    // ─── CryptosFaucet Network ───
-    if (config.faucets.cryptosfaucet_network.enabled) {
-      for (const site of config.faucets.cryptosfaucet_network.sites) {
-        const last = state.lastClaims[site] || 0;
-        if ((Date.now() - last) < 3600000) { log(`⏭️ CryptosFaucet ${site}: on cooldown`); continue; }
-        if (await claimCryptosFaucetNetwork(page, site)) { state.lastClaims[site] = Date.now(); claims++; }
-        await sleep(randDelay(5000, 20000));
-        if (++sinceRotate >= (config.rotate_ip_every || 5)) { await rotateTorIP(); sinceRotate = 0; }
+    // Try to solve captcha
+    const captchaFrame = await page.$('iframe[src*="recaptcha"], iframe[title*="recaptcha"]');
+    if (captchaFrame) {
+      const frame = await captchaFrame.contentFrame();
+      if (frame) {
+        const checkbox = await frame.$('.recaptcha-checkbox');
+        if (checkbox) await checkbox.click();
+        await sleep(2000);
       }
     }
+    
+    // Click main claim button
+    const claimBtn = await page.$('button:has-text("Claim"), a:has-text("Claim"), button:has-text("Roll"), input[value*="Claim"]');
+    if (claimBtn) await claimBtn.click();
+    await sleep(5000);
+    
+    log(`✅ ${faucetId}: claim submitted`);
+    state.totalClaims++;
+    state.totalClaimedCoins[fc.coin] = (state.totalClaimedCoins[fc.coin] || 0) + 1;
+    return true;
+  } catch (e) {
+    log(`❌ ${faucetId}: ${e.message}`);
+    return false;
+  }
+}
 
-    // ─── Beefaucet ───
-    if (config.faucets.beefaucet.enabled && (Date.now() - (state.lastClaims['beefaucet'] || 0)) > 3600000) {
-      await claimBeefaucet(page);
-      state.lastClaims['beefaucet'] = Date.now();
-      claims++;
-      await sleep(randDelay(5000, 15000));
+// --- Auto-discover new faucets ---
+async function autoDiscover() {
+  log('🔍 Auto-discovering new faucets...');
+  const sources = [
+    'https://pick.io/faucets',
+  ];
+  
+  try {
+    const resp = await fetch(sources[0]);
+    const html = await resp.text();
+    const coins = [...html.matchAll(/\/([a-z]{2,5})\/faucet/g)].map(m => m[1].toUpperCase());
+    const unique = [...new Set(coins)];
+    
+    if (unique.length > 0) {
+      const discovered = {};
+      if (fs.existsSync(DISCOVERY_PATH)) {
+        Object.assign(discovered, JSON.parse(fs.readFileSync(DISCOVERY_PATH, 'utf8')));
+      }
+      
+      for (const coin of unique) {
+        const key = `pick_io_${coin.toLowerCase()}`;
+        if (!config.faucets[key] && !discovered[key]) {
+          discovered[key] = { coin, url: `https://pick.io/${coin.toLowerCase()}` };
+          log(`🆕 Discovered: Pick.io/${coin}`);
+        }
+      }
+      
+      fs.writeFileSync(DISCOVERY_PATH, JSON.stringify(discovered, null, 2));
+      log(`✅ Discovery done: ${Object.keys(discovered).length} known`);
     }
+  } catch (e) {
+    log(`❌ Discovery error: ${e.message}`);
+  }
+}
 
-    // ─── Pick.io ───
-    const pickCoins = ['pick_io_bnb', 'pick_io_ltc', 'pick_io_sol', 'pick_io_ton', 'pick_io_trx', 'pick_io_doge', 'pick_io_btc', 'pick_io_eth'];
-    for (const key of pickCoins) {
-      const fc = config.faucets[key];
-      if (!fc?.enabled) continue;
-      if ((Date.now() - (state.lastClaims[key] || 0)) < 3600000) continue;
-      if (await claimPickIo(page, fc.coin)) { state.lastClaims[key] = Date.now(); claims++; }
-      await sleep(randDelay(5000, 15000));
+// --- Main cycle ---
+async function runCycle() {
+  log('🔄 Starting claim cycle...');
+  let claims = 0;
+  
+  // 1. FaucetPay API (no browser needed)
+  claims += await claimFaucetPayAPI();
+  
+  // 2. Launch browser for Playwright faucets
+  const browser = await chromium.launch({
+    headless: config.headless !== false,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+  });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+  });
+  const page = await context.newPage();
+  
+  try {
+    // Pick.io faucets
+    for (const [key, fc] of Object.entries(config.faucets)) {
+      if (!key.startsWith('pick_io_') || !fc.enabled) continue;
+      const coin = fc.coin || key.replace('pick_io_', '');
+      const lk = `pick_io_${coin.toLowerCase()}`;
+      if ((Date.now() - (state.lastClaims[lk] || 0)) < 3600000) continue;
+      
+      if (await claimPickIo(page, coin.toLowerCase())) {
+        claims++;
+        state.lastClaims[lk] = Date.now();
+      }
+      await sleep(randDelay(3000, 8000));
     }
-
-    // ─── Original faucets (Freebitco, FaucetCrypto) ───
-    if (config.faucets.freebitco_in?.enabled && (Date.now() - (state.lastClaims['freebitco_in'] || 0)) > 3600000) {
-      const { claimFreebitco } = require('./runner.js');
-      if (await claimFreebitco(page)) { state.lastClaims['freebitco_in'] = Date.now(); claims++; }
+    
+    // Freebitco.in
+    if ((Date.now() - (state.lastClaims['freebitco_in'] || 0)) > 3600000) {
+      if (await claimBrowserFaucet(page, 'freebitco_in')) {
+        claims++;
+        state.lastClaims['freebitco_in'] = Date.now();
+      }
     }
-    if (config.faucets.faucetcrypto?.enabled && (Date.now() - (state.lastClaims['faucetcrypto'] || 0)) > 2400000) {
-      const { claimFaucetCrypto } = require('./runner.js');
-      if (await claimFaucetCrypto(page)) { state.lastClaims['faucetcrypto'] = Date.now(); claims++; }
+    
+    // FaucetCrypto
+    if ((Date.now() - (state.lastClaims['faucetcrypto'] || 0)) > 2400000) {
+      if (await claimBrowserFaucet(page, 'faucetcrypto')) {
+        claims++;
+        state.lastClaims['faucetcrypto'] = Date.now();
+      }
     }
-
-    // ─── NEW: Allcoins ───
+    
+    // Moon faucets
+    for (const coin of ['BTC', 'LTC', 'DOGE']) {
+      if (await claimMoonFaucet(page, coin)) claims++;
+      await sleep(randDelay(3000, 8000));
+    }
+    
+    // BonusBitcoin
+    if (await claimBonusBitcoin(page)) claims++;
+    await sleep(randDelay(3000, 8000));
+    
+    // Allcoins
     for (const coin of ['BTC', 'DOGE', 'LTC']) {
-      const key = `allcoins_${coin}`;
-      if ((Date.now() - (state.lastClaims[key] || 0)) < 3600000) continue;
-      if (await claimAllcoins(page, coin)) { state.lastClaims[key] = Date.now(); claims++; }
-      await sleep(randDelay(5000, 15000));
+      if (await claimAllcoins(page, coin)) claims++;
+      await sleep(randDelay(3000, 8000));
     }
-
-    // ─── Auto-discover new faucets every 10 cycles ───
-    if ((state.runCount || 0) % 10 === 0) {
-      await discoverNewFaucets();
-    }
-
-    state.totalClaims += claims;
+    
+    // BeeFaucet
+    claims += await claimBeeFaucet(page);
+    
+    state.lastCycle = new Date().toISOString();
     state.runCount = (state.runCount || 0) + 1;
     state.lastRun = new Date().toISOString();
     saveState();
@@ -519,38 +439,13 @@ async function runCycle() {
   return claims;
 }
 
-// ─── AUTO-ADD DISCOVERED FAUCETS ───
-async function autoAddFaucets() {
-  if (!fs.existsSync(DISCOVERY_PATH)) return;
-  const discovered = JSON.parse(fs.readFileSync(DISCOVERY_PATH, 'utf8'));
-  let added = 0;
-  
-  for (const d of discovered) {
-    if (d.added) continue;
-    if (d.source === 'pick.io') {
-      const key = `pick_io_${d.coin.toLowerCase()}`;
-      if (!config.faucets[key]) {
-        config.faucets[key] = { enabled: true, url: d.url, coin: d.coin };
-        added++;
-      }
-    }
-    d.added = true;
-  }
-  
-  if (added > 0) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-    fs.writeFileSync(DISCOVERY_PATH, JSON.stringify(discovered, null, 2));
-    log(`✅ Auto-added ${added} new faucets to config!`);
-  }
-}
-
 // ─── MAIN LOOP ───
 async function main() {
   log('🚀 FAUCET FARM v2 starting...');
   loadState();
   
-  // Check for discovered faucets to auto-add
-  await autoAddFaucets();
+  // Auto-discover new faucets
+  await autoDiscover();
   
   let cycle = 0;
   while (true) {
