@@ -1,0 +1,10 @@
+# nixpacks.toml — Railway build config to install Chromium for Playwright
+
+[phases.setup]
+nixPkgs = ["chromium", "libgdk-pixbuf", "libnotify", "libglib", "libnspr", "libnss", "libatk", "libatk-bridge", "libcups", "libdrm", "libxkbcommon", "libxcomposite", "libxdamage", "libxrandr", "libgbm", "libpango", "libcairo", "libasound"]
+
+[phases.install]
+cmds = ["npx playwright install chromium"]
+
+[start]
+cmd = "node runner_v2.js"
